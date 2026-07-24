@@ -1,0 +1,22 @@
+--- ../arborium-cobol-orig/grammar/scanner.c	2026-07-24 16:01:15
++++ grammar/scanner.c	2026-07-24 15:59:36
+@@ -170,9 +170,18 @@
+     }
+ 
+     if(valid_symbols[LINE_PREFIX_COMMENT] && lexer->get_column(lexer) <= 5) {
+-        while(lexer->get_column(lexer) <= 5) {
++        // The column only advances while there is input left to consume: at EOF
++        // `advance` is a no-op, so a bare column test would spin forever.
++        bool consumed_any = false;
++        while(lexer->lookahead != 0 && lexer->get_column(lexer) <= 5) {
+             lexer->advance(lexer, true);
++            consumed_any = true;
+         }
++        // Never emit a zero-width token -- the parser would re-enter the scanner
++        // at the same position and loop just as tightly.
++        if(!consumed_any) {
++            return false;
++        }
+         lexer->result_symbol = LINE_PREFIX_COMMENT;
+         lexer->mark_end(lexer);
+         return true;
