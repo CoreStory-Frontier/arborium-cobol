@@ -1,0 +1,81 @@
+diff --git a/grammar/scanner.c b/grammar/scanner.c
+index bf0fbac..62088e3 100644
+--- a/grammar/scanner.c
++++ b/grammar/scanner.c
+@@ -152,6 +152,66 @@ static bool scan_exec_block(TSLexer *lexer) {
+     return false;
+ }
+ 
++// Scan a fixed-format alphanumeric literal opened with `quote` that is
++// continued onto following lines: the literal runs to column 72, the next line
++// carries `-` in column 7, and the first non-blank character in area B is
++// `quote`, after which the literal resumes. A doubled `quote` is an escaped
++// quote, not the end of the literal.
++//
++// Claims the token only when the literal actually continues: a literal that
++// closes on its own line returns false and is left to the internal lexer, so
++// single-line literals parse exactly as before.
++static bool scan_continued_literal(TSLexer *lexer, int32_t quote) {
++    if (lexer->lookahead != quote) {
++        return false;
++    }
++    lexer->advance(lexer, false);
++    bool continued = false;
++    while (true) {
++        while (lexer->lookahead != 0 && lexer->lookahead != '\n' && lexer->get_column(lexer) < 72) {
++            if (lexer->lookahead == quote) {
++                lexer->advance(lexer, false);
++                if (lexer->lookahead != quote) {
++                    if (!continued) {
++                        return false;
++                    }
++                    lexer->result_symbol = multiline_string;
++                    lexer->mark_end(lexer);
++                    return true;
++                }
++            }
++            lexer->advance(lexer, false);
++        }
++        // Columns 73-80 are the identification area, not literal content.
++        while (lexer->lookahead != 0 && lexer->lookahead != '\n') {
++            lexer->advance(lexer, false);
++        }
++        if (lexer->lookahead == 0) {
++            return false;
++        }
++        lexer->advance(lexer, false);
++        // Columns 1-6 are the sequence area.
++        for (int i = 0; i < 6; ++i) {
++            if (lexer->lookahead == 0 || lexer->lookahead == '\n') {
++                return false;
++            }
++            lexer->advance(lexer, false);
++        }
++        if (lexer->lookahead != '-') {
++            return false;
++        }
++        lexer->advance(lexer, false);
++        while (lexer->lookahead == ' ' && lexer->get_column(lexer) < 72) {
++            lexer->advance(lexer, false);
++        }
++        if (lexer->lookahead != quote) {
++            return false;
++        }
++        lexer->advance(lexer, false);
++        continued = true;
++    }
++}
++
+ bool tree_sitter_cobol_external_scanner_scan(void *payload, TSLexer *lexer,
+                                             const bool *valid_symbols) {
+     if(lexer->lookahead == 0) {
+@@ -226,6 +286,9 @@ bool tree_sitter_cobol_external_scanner_scan(void *payload, TSLexer *lexer,
+     }
+ 
+     if(valid_symbols[multiline_string]) {
++        if(lexer->lookahead == '\'') {
++            return scan_continued_literal(lexer, '\'');
++        }
+         while(true) {
+             if(lexer->lookahead != '"') {
+                 return false;
